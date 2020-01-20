@@ -1,16 +1,19 @@
 """
 from https://github.com/ibalazevic/TuckER
 """
-
+# Init wandb
+import wandb
+wandb.init(project="nnskge")
 
 from load_data import Data
 import numpy as np
 import torch
 import time
 from collections import defaultdict
-from model import *
+from model import NNSKGE, TuckER
 from torch.optim.lr_scheduler import ExponentialLR
 import argparse
+import datetime
 
     
 class Experiment:
@@ -18,7 +21,7 @@ class Experiment:
     def __init__(self, learning_rate=0.0005, ent_vec_dim=200, rel_vec_dim=200, 
                  num_iterations=500, batch_size=128, decay_rate=0., cuda=False, 
                  input_dropout=0.3, hidden_dropout1=0.4, hidden_dropout2=0.5,
-                 label_smoothing=0.):
+                 label_smoothing=0., model='NNSKGE'):
         self.learning_rate = learning_rate
         self.ent_vec_dim = ent_vec_dim
         self.rel_vec_dim = rel_vec_dim
@@ -27,6 +30,7 @@ class Experiment:
         self.decay_rate = decay_rate
         self.label_smoothing = label_smoothing
         self.cuda = cuda
+        self.model = model
         self.kwargs = {"input_dropout": input_dropout, "hidden_dropout1": hidden_dropout1,
                        "hidden_dropout2": hidden_dropout2}
         
@@ -52,7 +56,7 @@ class Experiment:
         return np.array(batch), targets
 
     
-    def evaluate(self, model, data):
+    def evaluate(self, model, data, it):
         hits = []
         ranks = []
         for i in range(10):
@@ -64,7 +68,7 @@ class Experiment:
         print("Number of data points: %d" % len(test_data_idxs))
         
         for i in range(0, len(test_data_idxs), self.batch_size):
-            data_batch, _ = self.get_batch(er_vocab, test_data_idxs, i)
+            data_batch, eval_targets= self.get_batch(er_vocab, test_data_idxs, i)
             e1_idx = torch.tensor(data_batch[:,0])
             r_idx = torch.tensor(data_batch[:,1])
             e2_idx = torch.tensor(data_batch[:,2])
@@ -72,7 +76,7 @@ class Experiment:
                 e1_idx = e1_idx.cuda()
                 r_idx = r_idx.cuda()
                 e2_idx = e2_idx.cuda()
-            predictions = model.forward(e1_idx, r_idx)
+            predictions = model.forward(e1_idx, r_idx, eval_targets)
 
             for j in range(data_batch.shape[0]):
                 filt = er_vocab[(data_batch[j][0], data_batch[j][1])]
@@ -99,16 +103,24 @@ class Experiment:
         print('Mean rank: {0}'.format(np.mean(ranks)))
         print('Mean reciprocal rank: {0}'.format(np.mean(1./np.array(ranks))))
 
+        wandb.log({'mean_rank': np.mean(ranks)}, step=it)
+
 
     def train_and_eval(self):
-        print("Training the NNSKGE model...")
+        print("Training the {} model...".format(self.model))
         self.entity_idxs = {d.entities[i]:i for i in range(len(d.entities))}
         self.relation_idxs = {d.relations[i]:i for i in range(len(d.relations))}
 
         train_data_idxs = self.get_data_idxs(d.train_data)
         print("Number of training data points: %d" % len(train_data_idxs))
 
-        model = NNSKGE(d, self.ent_vec_dim, self.rel_vec_dim, **self.kwargs)
+        if self.model == 'NNSKGE':
+            model = NNSKGE(d, self.ent_vec_dim, self.rel_vec_dim, **self.kwargs)
+        elif self.model == 'TUCKER':
+            model = TuckER(d, self.ent_vec_dim, self.rel_vec_dim, **self.kwargs)
+
+        wandb.watch(model, log="all")
+
         if self.cuda:
             model.cuda()
         model.init()
@@ -120,6 +132,7 @@ class Experiment:
         er_vocab_pairs = list(er_vocab.keys())
 
         print("Starting training...")
+        start_time = time.time()
         for it in range(1, self.num_iterations+1):
             start_train = time.time()
             model.train()    
@@ -133,35 +146,46 @@ class Experiment:
                 if self.cuda:
                     e1_idx = e1_idx.cuda()
                     r_idx = r_idx.cuda()
-                predictions = model.forward(e1_idx, r_idx)
+                predictions = model.forward(e1_idx, r_idx, targets)
+
                 if self.label_smoothing:
                     targets = ((1.0-self.label_smoothing)*targets) + (1.0/targets.size(1))           
-                loss = model.loss(predictions, targets)
+                loss = model.loss(predictions, targets) # + model.sparsity()
+                # TODO: add regu
                 loss.backward()
                 opt.step()
+                model.regularize()
                 losses.append(loss.item())
             if self.decay_rate:
                 scheduler.step()
-            print(it)
-            print(time.time()-start_train)    
-            print(np.mean(losses))
+            print('--' * 30)
+            print('Iteration {}'.format (it))
+            print('Total Time (h:m:s): {:2}'.format(str(datetime.timedelta(seconds=int(time.time()- start_time)))))
+            print('Iteration Time (h:m:s): {:2}'.format(str(datetime.timedelta(seconds=int(time.time()- start_train)))))
+            print('Mean loss: {}'.format(np.mean(losses)))
             model.eval()
             with torch.no_grad():
+
+                print('++' * 20)
                 print("Validation:")
-                self.evaluate(model, d.valid_data)
-                if not it%2:
+                self.evaluate(model, d.valid_data, it)
+                if not it%5:
+                    print('##' * 20)
                     print("Test:")
                     start_test = time.time()
-                    self.evaluate(model, d.test_data)
-                    print(time.time()-start_test)
-           
+                    self.evaluate(model, d.test_data, it)
+                    print('Test Time (h:m:s): {:2}'.format(str(datetime.timedelta(seconds=int(time.time()- start_test)))))
 
-        
+                print('Sparsity (entity embeddings): {}'.format(model.countZeroWeights()))
+                print('Negativity (entity embeddings): {}'.format(model.countNegativeWeights()))
+           
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument("--dataset", type=str, default="FB15k-237", nargs="?",
                     help="Which dataset to use: FB15k, FB15k-237, WN18 or WN18RR.")
+    parser.add_argument("--model", type=str, default="NNSKGE", nargs="?",
+                    help="Which model to use: NNSKGE or TUCKER.")
     parser.add_argument("--num_iterations", type=int, default=500, nargs="?",
                     help="Number of iterations.")
     parser.add_argument("--batch_size", type=int, default=128, nargs="?",
@@ -186,6 +210,8 @@ if __name__ == '__main__':
                     help="Amount of label smoothing.")
 
     args = parser.parse_args()
+    wandb.config.update(args) # adds all of the arguments as config variables
+
     dataset = args.dataset
     data_dir = "data/%s/" % dataset
     torch.backends.cudnn.deterministic = True 
@@ -198,5 +224,7 @@ if __name__ == '__main__':
     experiment = Experiment(num_iterations=args.num_iterations, batch_size=args.batch_size, learning_rate=args.lr, 
                             decay_rate=args.dr, ent_vec_dim=args.edim, rel_vec_dim=args.rdim, cuda=args.cuda,
                             input_dropout=args.input_dropout, hidden_dropout1=args.hidden_dropout1, 
-                            hidden_dropout2=args.hidden_dropout2, label_smoothing=args.label_smoothing)
+                            hidden_dropout2=args.hidden_dropout2, label_smoothing=args.label_smoothing, model=args.model)
     experiment.train_and_eval()
+    print('#' * 40)
+    print("Finished!")
