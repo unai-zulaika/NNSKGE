@@ -82,8 +82,6 @@ class NNSKGE(torch.nn.Module):
                 neg += torch.sum((param < 0).int()).data.item()
         return int(neg/p)
 
-    #TODO: add Frobenius norm to embeddings
-
 
 class TuckER(torch.nn.Module):
     def __init__(self, d, d1, d2, **kwargs):

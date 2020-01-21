@@ -1,7 +1,9 @@
+# nohup
 *.out
 
-# Wand DB logs
+# Wand DB 
 wandb/
+sweep.yaml
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

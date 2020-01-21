@@ -57,6 +57,7 @@ class Experiment:
 
     
     def evaluate(self, model, data, it):
+        best_mrr = 0
         hits = []
         ranks = []
         for i in range(10):
@@ -97,13 +98,20 @@ class Experiment:
                     else:
                         hits[hits_level].append(0.0)
 
+
+        mrr = np.mean(1./np.array(ranks)) 
         print('Hits @10: {0}'.format(np.mean(hits[9])))
         print('Hits @3: {0}'.format(np.mean(hits[2])))
         print('Hits @1: {0}'.format(np.mean(hits[0])))
         print('Mean rank: {0}'.format(np.mean(ranks)))
-        print('Mean reciprocal rank: {0}'.format(np.mean(1./np.array(ranks))))
+        print('Mean reciprocal rank: {0}'.format(mrr))
 
-        wandb.log({'mean_rank': np.mean(ranks)}, step=it)
+        wandb.log({'val_mean_rank': np.mean(ranks)}, step=it)
+        wandb.log({'val_mrr': mrr}, step=it)
+
+        if (mrr > best_mrr):
+            wandb.run.summary["best_mrr"] = mrr
+            best_mrr= mrr
 
 
     def train_and_eval(self):
@@ -151,7 +159,7 @@ class Experiment:
                 if self.label_smoothing:
                     targets = ((1.0-self.label_smoothing)*targets) + (1.0/targets.size(1))           
                 loss = model.loss(predictions, targets) # + model.sparsity()
-                # TODO: add regu
+
                 loss.backward()
                 opt.step()
                 model.regularize()
@@ -163,6 +171,7 @@ class Experiment:
             print('Total Time (h:m:s): {:2}'.format(str(datetime.timedelta(seconds=int(time.time()- start_time)))))
             print('Iteration Time (h:m:s): {:2}'.format(str(datetime.timedelta(seconds=int(time.time()- start_train)))))
             print('Mean loss: {}'.format(np.mean(losses)))
+            wandb.log({'loss': np.mean(losses)}, step=it)
             model.eval()
             with torch.no_grad():
 
