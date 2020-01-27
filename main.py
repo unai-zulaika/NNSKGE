@@ -3,7 +3,6 @@ from https://github.com/ibalazevic/TuckER
 """
 # Init wandb
 import wandb
-wandb.init(project="nnskge")
 
 from load_data import Data
 import numpy as np
@@ -14,6 +13,7 @@ from model import NNSKGE, TuckER
 from torch.optim.lr_scheduler import ExponentialLR
 import argparse
 import datetime
+import os
 
     
 class Experiment:
@@ -21,7 +21,8 @@ class Experiment:
     def __init__(self, learning_rate=0.0005, ent_vec_dim=200, rel_vec_dim=200, 
                  num_iterations=500, batch_size=128, decay_rate=0., cuda=False, 
                  input_dropout=0.3, hidden_dropout1=0.4, hidden_dropout2=0.5,
-                 label_smoothing=0., model='NNSKGE'):
+                 label_smoothing=0., model='NNSKGE', loss='CE', optimizer='Adam', sparsity_hp=1.0, 
+                 prox_reg=0.01, prox_lr=0.1):
         self.learning_rate = learning_rate
         self.ent_vec_dim = ent_vec_dim
         self.rel_vec_dim = rel_vec_dim
@@ -31,8 +32,11 @@ class Experiment:
         self.label_smoothing = label_smoothing
         self.cuda = cuda
         self.model = model
+        self.loss = loss
+        self.optimizer = optimizer
+        self.sparsity_hp = sparsity_hp
         self.kwargs = {"input_dropout": input_dropout, "hidden_dropout1": hidden_dropout1,
-                       "hidden_dropout2": hidden_dropout2}
+                       "hidden_dropout2": hidden_dropout2, "loss": loss, "prox_lr": prox_lr, "prox_reg": prox_reg}
         
     def get_data_idxs(self, data):
         data_idxs = [(self.entity_idxs[data[i][0]], self.relation_idxs[data[i][1]], \
@@ -132,7 +136,11 @@ class Experiment:
         if self.cuda:
             model.cuda()
         model.init()
-        opt = torch.optim.Adam(model.parameters(), lr=self.learning_rate)
+        if self.optimizer == 'Adam':
+            opt = torch.optim.Adam(model.parameters(), lr=self.learning_rate)
+        elif self.optimizer == 'Adagrad':
+            opt = torch.optim.Adagrad(model.parameters(), lr=self.learning_rate)
+
         if self.decay_rate:
             scheduler = ExponentialLR(opt, self.decay_rate)
 
@@ -158,12 +166,15 @@ class Experiment:
 
                 if self.label_smoothing:
                     targets = ((1.0-self.label_smoothing)*targets) + (1.0/targets.size(1))           
-                loss = model.loss(predictions, targets) # + model.sparsity()
 
+                loss = model.loss(predictions, targets) # + (self.sparsity_hp * model.sparsity())
+                
                 loss.backward()
                 opt.step()
-                model.regularize()
+                model.proximal()
+                model.regularize() # projection [0,1]
                 losses.append(loss.item())
+
             if self.decay_rate:
                 scheduler.step()
             print('--' * 30)
@@ -186,6 +197,7 @@ class Experiment:
                     print('Test Time (h:m:s): {:2}'.format(str(datetime.timedelta(seconds=int(time.time()- start_test)))))
 
                 print('Sparsity (entity embeddings): {}'.format(model.countZeroWeights()))
+                wandb.log({'ent_spars': np.mean(model.countZeroWeights())}, step=it)
                 print('Negativity (entity embeddings): {}'.format(model.countNegativeWeights()))
            
 
@@ -195,12 +207,20 @@ if __name__ == '__main__':
                     help="Which dataset to use: FB15k, FB15k-237, WN18 or WN18RR.")
     parser.add_argument("--model", type=str, default="NNSKGE", nargs="?",
                     help="Which model to use: NNSKGE or TUCKER.")
+    parser.add_argument("--loss", type=str, default="BCE", nargs="?",
+                    help="Which loss to use: BCE or CE.")
+    parser.add_argument("--optimizer", type=str, default="Adam", nargs="?",
+                    help="Which optimizer to use: Adam or Adagrad.")
     parser.add_argument("--num_iterations", type=int, default=500, nargs="?",
                     help="Number of iterations.")
     parser.add_argument("--batch_size", type=int, default=128, nargs="?",
                     help="Batch size.")
     parser.add_argument("--lr", type=float, default=0.0005, nargs="?",
                     help="Learning rate.")
+    parser.add_argument("--prox_lr", type=float, default=0.05, nargs="?",
+                    help="Proximal Learning rate.")
+    parser.add_argument("--prox_reg", type=float, default=0.01, nargs="?",
+                    help="Proximal regularization rate.")
     parser.add_argument("--dr", type=float, default=1.0, nargs="?",
                     help="Decay rate.")
     parser.add_argument("--edim", type=int, default=200, nargs="?",
@@ -217,9 +237,12 @@ if __name__ == '__main__':
                     help="Dropout after the second hidden layer.")
     parser.add_argument("--label_smoothing", type=float, default=0.1, nargs="?",
                     help="Amount of label smoothing.")
+    parser.add_argument("--sparsity_hp", type=float, default=1.0, nargs="?",
+                    help="Sparsity intensity.")
+    parser.add_argument("--nowandb", dest='nowandb', action='store_true', default=False,
+                    help="Log wandb.")
 
     args = parser.parse_args()
-    wandb.config.update(args) # adds all of the arguments as config variables
 
     dataset = args.dataset
     data_dir = "data/%s/" % dataset
@@ -229,11 +252,18 @@ if __name__ == '__main__':
     torch.manual_seed(seed)
     if torch.cuda.is_available:
         torch.cuda.manual_seed_all(seed) 
+
+    if args.nowandb:
+        os.environ['WANDB_MODE'] = 'dryrun'
+    wandb.init(project="nnskge")
+    wandb.config.update(args) # adds all of the arguments as config variables
+
     d = Data(data_dir=data_dir, reverse=True)
     experiment = Experiment(num_iterations=args.num_iterations, batch_size=args.batch_size, learning_rate=args.lr, 
                             decay_rate=args.dr, ent_vec_dim=args.edim, rel_vec_dim=args.rdim, cuda=args.cuda,
                             input_dropout=args.input_dropout, hidden_dropout1=args.hidden_dropout1, 
-                            hidden_dropout2=args.hidden_dropout2, label_smoothing=args.label_smoothing, model=args.model)
+                            hidden_dropout2=args.hidden_dropout2, label_smoothing=args.label_smoothing, model=args.model, 
+                            loss=args.loss, sparsity_hp=args.sparsity_hp, prox_lr=args.prox_lr, prox_reg=args.prox_reg)
     experiment.train_and_eval()
     print('#' * 40)
     print("Finished!")

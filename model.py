@@ -5,6 +5,7 @@ from https://github.com/ibalazevic/TuckER
 import numpy as np
 import torch
 from torch.nn.init import xavier_normal_, uniform_, eye_
+from proximalGradient import l1
 
 class NNSKGE(torch.nn.Module):
     def __init__(self, d, d1, d2, **kwargs):
@@ -18,21 +19,21 @@ class NNSKGE(torch.nn.Module):
         self.input_dropout = torch.nn.Dropout(kwargs["input_dropout"])
         self.hidden_dropout1 = torch.nn.Dropout(kwargs["hidden_dropout1"])
         self.hidden_dropout2 = torch.nn.Dropout(kwargs["hidden_dropout2"])
-        self.loss = torch.nn.BCELoss()
+        if kwargs["loss"] == 'BCE':
+            self.loss = torch.nn.BCELoss()
+        elif kwargs["loss"]== 'CE':
+            self.loss = torch.nn.CrossEntropyLoss()
+
+        self.prox_lr = kwargs["prox_lr"]
+        self.prox_reg= kwargs["prox_reg"]
 
         self.bn0 = torch.nn.BatchNorm1d(d1)
         self.bn1 = torch.nn.BatchNorm1d(d1)
-
-        self.sparsity_hp = 0.5
         
     def init(self):
-        # xavier_normal_(self.E.weight.data)
-        # xavier_normal_(self.R.weight.data)
         uniform_(self.E.weight.data, a=0.0, b=1.0)
         uniform_(self.R.weight.data, a=0.0, b=1.0)
-        # eye_(self.W.data)
-
-
+  
     def forward(self, e1_idx, r_idx, y):
         
         e1 = self.E(e1_idx)
@@ -61,26 +62,29 @@ class NNSKGE(torch.nn.Module):
         self.W.data = torch.clamp(self.W, min=0, max=1)
     
     def sparsity(self,):
-        reg = torch.norm(self.E.weight, p=1) + torch.norm(self.R.weight, p=1) + torch.norm(self.W, p=1)
-        return (self.sparsity_hp * reg) 
+        reg = torch.norm(self.E.weight, p=1) + torch.norm(self.R.weight, p=1)  # + torch.norm(self.W, p=1)
+        return reg
+
+    def proximal(self,):
+        l1(self.E.weight, reg=self.prox_reg, lr=self.prox_lr)
+        l1(self.R.weight, reg=self.prox_reg, lr=self.prox_lr)
 
     def countZeroWeights(self):
         zeros = 0
         p = 0
         for param in self.E.weight:
-            if param is not None:
-                p += 1
-                zeros += torch.sum((param == 0).int()).data.item()
-        return int(zeros/p)
+            p += param.size()[0]
+            zeros += param.numel() - param.nonzero().size(0)
+        return (zeros/p)
 
     def countNegativeWeights(self):
         neg = 0
         p = 0
         for param in self.E.weight:
             if param is not None:
-                p += 1
-                neg += torch.sum((param < 0).int()).data.item()
-        return int(neg/p)
+                p += param.size()[0]
+                neg += torch.sum((param < 0)).data.item()
+        return (neg/p)
 
 
 class TuckER(torch.nn.Module):
@@ -95,7 +99,10 @@ class TuckER(torch.nn.Module):
         self.input_dropout = torch.nn.Dropout(kwargs["input_dropout"])
         self.hidden_dropout1 = torch.nn.Dropout(kwargs["hidden_dropout1"])
         self.hidden_dropout2 = torch.nn.Dropout(kwargs["hidden_dropout2"])
-        self.loss = torch.nn.BCELoss()
+        if kwargs["loss"] == 'BCE':
+            self.loss = torch.nn.BCELoss()
+        elif kwargs["loss"]== 'CE':
+            self.loss = torch.nn.CrossEntropyLoss()
 
         self.bn0 = torch.nn.BatchNorm1d(d1)
         self.bn1 = torch.nn.BatchNorm1d(d1)
@@ -125,25 +132,28 @@ class TuckER(torch.nn.Module):
         return pred
 
     def sparsity(self,):
-        return 0
+        # return 0
+        reg = torch.norm(self.E.weight, p=1) + torch.norm(self.R.weight, p=1)  # + torch.norm(self.W, p=1)
+        return reg
     
     def regularize(self):
-        i=0
+        self.E.weight.data = torch.clamp(self.E.weight, min=0, max=1)
+        self.R.weight.data = torch.clamp(self.R.weight, min=0, max=1)
+        self.W.data = torch.clamp(self.W, min=0, max=1)
 
     def countZeroWeights(self):
         zeros = 0
         p = 0
         for param in self.E.weight:
-            if param is not None:
-                p += 1
-                zeros += torch.sum((param == 0).int()).data.item()
-        return int(zeros/p)
+            p += param.size()[0]
+            zeros += param.numel() - param.nonzero().size(0)
+        return (zeros/p)
 
     def countNegativeWeights(self):
         neg = 0
         p = 0
         for param in self.E.weight:
             if param is not None:
-                p += 1
-                neg += torch.sum((param < 0).int()).data.item()
-        return int(neg/p)
+                p += param.size()[0]
+                neg += torch.sum((param < 0)).data.item()
+        return (neg/p)

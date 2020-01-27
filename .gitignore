@@ -1,3 +1,6 @@
+ProxGradPytorch/
+proximal_gradient/
+
 # nohup
 *.out
 
