@@ -158,6 +158,7 @@ def l1(parameter, bias=None, reg=0.01, lr=0.1):
     update_w = parameter - pos + neg
     parameter.data = update_w
 
+    # TODO: review if BIAS needs to apply proximal
     if bias is not None:
         if bias.is_cuda:
             Norms_b = Norm*torch.ones(bias.size(), device=torch.device("cuda"))

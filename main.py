@@ -59,7 +59,7 @@ class Experiment:
             targets = targets.cuda()
         return np.array(batch), targets
 
-    
+
     def evaluate(self, model, data, it):
         best_mrr = 0
         hits = []
@@ -172,7 +172,7 @@ class Experiment:
                 loss.backward()
                 opt.step()
                 model.proximal()
-                model.regularize() # projection [0,1]
+                model.regularize() # projection [0,max]
                 losses.append(loss.item())
 
             if self.decay_rate:
@@ -196,8 +196,10 @@ class Experiment:
                     self.evaluate(model, d.test_data, it)
                     print('Test Time (h:m:s): {:2}'.format(str(datetime.timedelta(seconds=int(time.time()- start_test)))))
 
-                print('Sparsity (entity embeddings): {}'.format(model.countZeroWeights()))
-                wandb.log({'ent_spars': np.mean(model.countZeroWeights())}, step=it)
+                print('Sparsity (entity embeddings): {}'.format(model.countZeroWeightsEnt()))
+                wandb.log({'ent_spars': np.mean(model.countZeroWeightsEnt())}, step=it)
+                print('Sparsity (relation embeddings): {}'.format(model.countZeroWeightsRel()))
+                wandb.log({'rel_spars': np.mean(model.countZeroWeightsRel())}, step=it)
                 print('Negativity (entity embeddings): {}'.format(model.countNegativeWeights()))
            
 
