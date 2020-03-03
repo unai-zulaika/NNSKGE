@@ -2,6 +2,19 @@ import numpy as np
 import torch
 
 
+def pick_top_k(embeddings_indexes, k=5):
+    embeddings = embeddings_indexes.weight
+    sorted, indexes = torch.sort(embeddings, dim=0, descending=True)
+
+    topk = torch.index_select(sorted, 0, torch.arange(k).cuda())
+
+    intruder_index = int(sorted.size()[0] - (sorted.size()[0] / 10))
+
+    intruders = torch.index_select(
+        sorted, 0,
+        torch.tensor(intruder_index).cuda()).squeeze()
+
+
 def getDistRatio(embeddings_indexes, k=5):
     embeddings = embeddings_indexes.weight
     sorted, indexes = torch.sort(embeddings, dim=0, descending=True)

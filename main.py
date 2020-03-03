@@ -1,24 +1,22 @@
 """
 from https://github.com/ibalazevic/TuckER
 """
-# Init wandb
-import wandb
-
-from load_data import Data
-import numpy as np
-import torch
 import time
-from collections import defaultdict
-from model import NNSKGE, TuckER
-from torch.optim.lr_scheduler import ExponentialLR
 import argparse
 import datetime
 import os
+from collections import defaultdict
+
+from load_data import Data
+from model import TuckER
 from interpretability_evaluation import getDistRatio
-from pgm import PGM
-from rda import RDA
-from gRDA import gRDA, custom_SGD
-from random import randint
+from gRDA import gRDA_momentum, gRDAAdam
+
+# Init wandb
+import wandb
+
+import numpy as np
+import torch
 
 
 class Experiment:
@@ -34,15 +32,11 @@ class Experiment:
                  hidden_dropout1=0.4,
                  hidden_dropout2=0.5,
                  label_smoothing=0.,
-                 model='NNSKGE',
                  loss='CE',
-                 optimizer='Proximal',
-                 sparsity_hp=1.0,
-                 prox_reg=0.01,
-                 prox_lr=0.1,
-                 alpha=0.9,
+                 optimizer='RDA',
                  reg=10e-08,
-                 mu=0.5):
+                 mu=0.5,
+                 c=0.0005):
         self.learning_rate = learning_rate
         self.ent_vec_dim = ent_vec_dim
         self.rel_vec_dim = rel_vec_dim
@@ -51,20 +45,16 @@ class Experiment:
         self.decay_rate = decay_rate
         self.label_smoothing = label_smoothing
         self.cuda = cuda
-        self.model = model
         self.loss = loss
         self.optimizer = optimizer
-        self.sparsity_hp = sparsity_hp
-        self.alpha = alpha
         self.reg = reg
         self.mu = mu
+        self.c = c
         self.kwargs = {
             "input_dropout": input_dropout,
             "hidden_dropout1": hidden_dropout1,
             "hidden_dropout2": hidden_dropout2,
             "loss": loss,
-            "prox_lr": prox_lr,
-            "prox_reg": prox_reg,
         }
 
     def adjust_learning_rate(self, epoch, optimizer):
@@ -155,7 +145,6 @@ class Experiment:
             best_mrr = mrr
 
     def train_and_eval(self):
-        print("Training the {} model...".format(self.model))
         self.entity_idxs = {d.entities[i]: i for i in range(len(d.entities))}
         self.relation_idxs = {
             d.relations[i]: i
@@ -165,12 +154,7 @@ class Experiment:
         train_data_idxs = self.get_data_idxs(d.train_data)
         print("Number of training data points: %d" % len(train_data_idxs))
 
-        if self.model == 'NNSKGE':
-            model = NNSKGE(d, self.ent_vec_dim, self.rel_vec_dim,
-                           **self.kwargs)
-        elif self.model == 'TUCKER':
-            model = TuckER(d, self.ent_vec_dim, self.rel_vec_dim,
-                           **self.kwargs)
+        model = TuckER(d, self.ent_vec_dim, self.rel_vec_dim, **self.kwargs)
 
         wandb.watch(model, log="all")
 
@@ -186,36 +170,30 @@ class Experiment:
                 if param.requires_grad:
                     print(name, param.data)
         elif self.optimizer == 'SGD':
-            opt = custom_SGD(model.parameters(),
+            opt = torch.optim.SGD(model.parameters(),
                                   lr=self.learning_rate,
                                   momentum=0.9)
-        elif self.optimizer == 'Proximal':
-            prox_plus = torch.nn.Threshold(0, 0)
-            prox = prox_plus
-            print('Using Proximal!')
-            opt = PGM(model.parameters(), [prox],
-                      lr=self.learning_rate,
-                      momentum=0.5)
 
         elif self.optimizer == 'RDA':
-            prox_plus = torch.nn.Threshold(0, 0)
-            prox = prox_plus
             print('Using RDA!')
-            opt = gRDA(model.parameters(),
-                       lr=self.learning_rate,
-                       c=0.0005,
-                       mu=self.mu)
-            # opt = RDA(model, [prox],
-            #           lr=self.learning_rate,
-            #           alpha=self.alpha,
-            #           reg=self.reg,
-            #           momentum=0.1)
+            opt = gRDA_momentum(model.parameters(),
+                                lr=self.learning_rate,
+                                c=self.c,
+                                mu=self.mu,
+                                momentum=0.9,
+                                reg='l1')
+
             for name, param in model.named_parameters():
                 if param.requires_grad:
                     print(name, param.data)
 
-        if self.decay_rate:
-            scheduler = ExponentialLR(opt, self.decay_rate)
+        elif self.optimizer == 'RDA_adam':
+            print('Using RDA_Adam!')
+            opt = gRDAAdam(model.parameters(),
+                           lr=self.learning_rate,
+                           c=self.c,
+                           mu=self.mu,
+                           reg='l1')
 
         er_vocab = self.get_er_vocab(train_data_idxs)
         er_vocab_pairs = list(er_vocab.keys())
@@ -227,8 +205,7 @@ class Experiment:
             model.train()
             losses = []
             np.random.shuffle(er_vocab_pairs)
-            current_lr = self.adjust_learning_rate(it, opt)
-            print(current_lr)
+
             for j in range(0, len(er_vocab_pairs), self.batch_size):
                 data_batch, targets = self.get_batch(er_vocab, er_vocab_pairs,
                                                      j)
@@ -251,8 +228,6 @@ class Experiment:
                 opt.zero_grad()
 
                 losses.append(loss.item())
-            # if self.decay_rate and j % 30 == 0:
-            #     scheduler.step()
 
             print('--' * 30)
             print('Iteration {}'.format(it))
@@ -281,15 +256,24 @@ class Experiment:
                                                            start_test)))))
 
                 print('Sparsity (entity embeddings): {}'.format(
-                    model.countZeroWeightsEnt()))
-                wandb.log({'ent_spars': np.mean(model.countZeroWeightsEnt())},
-                          step=it)
+                    model.count_zero_weights_ent()))
+                wandb.log(
+                    {'ent_spars': np.mean(model.count_zero_weights_ent())},
+                    step=it)
                 print('Sparsity (relation embeddings): {}'.format(
-                    model.countZeroWeightsRel()))
-                wandb.log({'rel_spars': np.mean(model.countZeroWeightsRel())},
-                          step=it)
+                    model.count_zero_weights_rel()))
+                wandb.log(
+                    {'rel_spars': np.mean(model.count_zero_weights_rel())},
+                    step=it)
+                print('Sparsity (core tensor): {}'.format(
+                    model.count_zero_weights_W()))
+
                 print('Negativity (entity embeddings): {}'.format(
-                    model.countNegativeWeights()))
+                    model.count_negative_weights_ent()))
+                print('Negativity (relation embeddings): {}'.format(
+                    model.count_negative_weights_rel()))
+                print('Negativity (core tensor): {}'.format(
+                    model.count_negative_weights_W()))
 
                 e_dr = getDistRatio(model.E)
                 r_dr = getDistRatio(model.R)
@@ -297,9 +281,7 @@ class Experiment:
                 wandb.log({'ent_distratio': e_dr}, step=it)
                 print('DistRatio (relation embeddings): {}'.format(r_dr))
                 wandb.log({'rel_distratio': r_dr}, step=it)
-                # for name, param in model.named_parameters():
-                #     if param.requires_grad:
-                #         print(name, param.data)
+
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -309,22 +291,16 @@ if __name__ == '__main__':
         default="FB15k-237",
         nargs="?",
         help="Which dataset to use: FB15k, FB15k-237, WN18 or WN18RR.")
-    parser.add_argument("--model",
-                        type=str,
-                        default="NNSKGE",
-                        nargs="?",
-                        help="Which model to use: NNSKGE or TUCKER.")
     parser.add_argument("--loss",
                         type=str,
                         default="BCE",
                         nargs="?",
                         help="Which loss to use: BCE or CE.")
-    parser.add_argument(
-        "--optimizer",
-        type=str,
-        default="RDA",
-        nargs="?",
-        help="Which optimizer to use: Adam, Adagrad, RDA or Proximal.")
+    parser.add_argument("--optimizer",
+                        type=str,
+                        default="RDA",
+                        nargs="?",
+                        help="Which optimizer to use: Adam, SGD or RDA.")
     parser.add_argument("--num_iterations",
                         type=int,
                         default=2400,
@@ -340,16 +316,6 @@ if __name__ == '__main__':
                         default=0.0005,
                         nargs="?",
                         help="Learning rate.")
-    parser.add_argument("--prox_lr",
-                        type=float,
-                        default=0.05,
-                        nargs="?",
-                        help="Proximal Learning rate.")
-    parser.add_argument("--prox_reg",
-                        type=float,
-                        default=0.01,
-                        nargs="?",
-                        help="Proximal regularization rate.")
     parser.add_argument("--dr",
                         type=float,
                         default=0.1,
@@ -390,21 +356,16 @@ if __name__ == '__main__':
                         default=0.1,
                         nargs="?",
                         help="Amount of label smoothing.")
-    parser.add_argument("--sparsity_hp",
-                        type=float,
-                        default=1.0,
-                        nargs="?",
-                        help="Sparsity intensity.")
-    parser.add_argument("--alpha",
-                        type=float,
-                        default=0.9,
-                        nargs="?",
-                        help="Alpha RDA.")
     parser.add_argument("--mu",
                         type=float,
                         default=0.5,
                         nargs="?",
                         help="RDA mu")
+    parser.add_argument("--c",
+                        type=float,
+                        default=0.00005,
+                        nargs="?",
+                        help="RDA c")
     parser.add_argument("--nowandb",
                         dest='nowandb',
                         action='store_true',
@@ -416,8 +377,6 @@ if __name__ == '__main__':
     dataset = args.dataset
     data_dir = "data/%s/" % dataset
     torch.backends.cudnn.deterministic = True
-    # TODO: SEED!
-    # seed = randint(0, 1000)
     seed = 20
     np.random.seed(seed)
     torch.manual_seed(seed)
@@ -441,12 +400,10 @@ if __name__ == '__main__':
                             hidden_dropout1=args.hidden_dropout1,
                             hidden_dropout2=args.hidden_dropout2,
                             label_smoothing=args.label_smoothing,
-                            model=args.model,
                             optimizer=args.optimizer,
                             loss=args.loss,
-                            sparsity_hp=args.sparsity_hp,
-                            prox_lr=args.prox_lr,
-                            prox_reg=args.prox_reg)
+                            mu=args.mu,
+                            c=args.c)
     experiment.train_and_eval()
     print('#' * 40)
     print("Finished!")
