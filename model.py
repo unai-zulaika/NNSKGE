@@ -69,7 +69,8 @@ class TuckER(torch.nn.Module):
             p += param.size()[0]
             zeros += param.numel() - param.nonzero().size(0)
         return (zeros / p)
-
+        
+    # TODO: is a 3 way tensor!
     def count_zero_weights_W(self):
         zeros = 0
         p = 0
@@ -96,6 +97,7 @@ class TuckER(torch.nn.Module):
                 neg += torch.sum((param < 0)).data.item()
         return (neg / p)
 
+    # TODO: is a 3 way tensor!
     def count_negative_weights_W(self):
         neg = 0
         p = 0

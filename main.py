@@ -9,7 +9,7 @@ from collections import defaultdict
 
 from load_data import Data
 from model import TuckER
-from interpretability_evaluation import getDistRatio
+from interpretability_evaluation import getDistRatio, pick_top_k
 from gRDA import gRDA_momentum, gRDAAdam
 
 # Init wandb
@@ -115,9 +115,7 @@ class Experiment:
                 predictions[j, filt] = 0.0
                 predictions[j, e2_idx[j]] = target_value
 
-            sort_values, sort_idxs = torch.sort(predictions,
-                                                dim=1,
-                                                descending=True)
+            _, sort_idxs = torch.sort(predictions, dim=1, descending=True)
 
             sort_idxs = sort_idxs.cpu().numpy()
             for j in range(data_batch.shape[0]):
@@ -146,6 +144,7 @@ class Experiment:
 
     def train_and_eval(self):
         self.entity_idxs = {d.entities[i]: i for i in range(len(d.entities))}
+        self.idxs_entity = {i: d.entities[i] for i in range(len(d.entities))}
         self.relation_idxs = {
             d.relations[i]: i
             for i in range(len(d.relations))
@@ -275,8 +274,12 @@ class Experiment:
                 print('Negativity (core tensor): {}'.format(
                     model.count_negative_weights_W()))
 
+                pick_top_k(model.E, d.entity_ids_to_readable, self.idxs_entity)
+                exit()
+
                 e_dr = getDistRatio(model.E)
                 r_dr = getDistRatio(model.R)
+
                 print('DistRatio (entity embeddings): {}'.format(e_dr))
                 wandb.log({'ent_distratio': e_dr}, step=it)
                 print('DistRatio (relation embeddings): {}'.format(r_dr))
