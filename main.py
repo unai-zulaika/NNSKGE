@@ -254,6 +254,10 @@ class Experiment:
                             datetime.timedelta(seconds=int(time.time() -
                                                            start_test)))))
 
+                if not it % 100:
+                    pick_top_k(model.E, d.entity_ids_to_readable,
+                               self.idxs_entity)
+
                 print('Sparsity (entity embeddings): {}'.format(
                     model.count_zero_weights_ent()))
                 wandb.log(
@@ -273,9 +277,6 @@ class Experiment:
                     model.count_negative_weights_rel()))
                 print('Negativity (core tensor): {}'.format(
                     model.count_negative_weights_W()))
-
-                pick_top_k(model.E, d.entity_ids_to_readable, self.idxs_entity)
-                exit()
 
                 e_dr = getDistRatio(model.E)
                 r_dr = getDistRatio(model.R)
