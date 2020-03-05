@@ -25,8 +25,8 @@ class TuckER(torch.nn.Module):
         if kwargs["loss"] == 'BCE':
             self.loss = torch.nn.BCELoss()
         elif kwargs["loss"] == 'CE':
-            self.loss = torch.nn.CrossEntropyLoss()
-            self._klloss = torch.nn.KLDivLoss()
+            self.loss = torch.nn.CrossEntropyLoss(reduction="sum")
+            self.klloss = torch.nn.KLDivLoss(reduction="sum")
 
         self.bn0 = torch.nn.BatchNorm1d(d1)
         self.bn1 = torch.nn.BatchNorm1d(d1)
@@ -69,7 +69,7 @@ class TuckER(torch.nn.Module):
             p += param.size()[0]
             zeros += param.numel() - param.nonzero().size(0)
         return (zeros / p)
-        
+
     # TODO: is a 3 way tensor!
     def count_zero_weights_W(self):
         zeros = 0

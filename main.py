@@ -17,6 +17,7 @@ import wandb
 
 import numpy as np
 import torch
+import torch.nn.functional as F
 
 
 class Experiment:
@@ -220,7 +221,12 @@ class Experiment:
                     targets = ((1.0 - self.label_smoothing) *
                                targets) + (1.0 / targets.size(1))
 
-                loss = model.loss(predictions, targets)
+                if self.kwargs['loss'] == 'CE':
+                    loss = model.klloss(
+                        F.log_softmax(predictions, dim=1),
+                        F.normalize(targets.float(), p=1, dim=1))
+                else:
+                    loss = model.loss(predictions, targets)
 
                 loss.backward()
                 opt.step()
