@@ -25,7 +25,7 @@ def pick_top_k(embeddings_indexes, ent_dict, idxs_entity, k=5):
 
 def getDistRatio(embeddings_indexes, k=5):
     embeddings = embeddings_indexes.weight
-    _, indexes = torch.sort(embeddings, dim=0, descending=True)
+    sorted, indexes = torch.sort(embeddings, dim=0, descending=True)
 
     topk = torch.index_select(sorted, 0, torch.arange(k).cuda())
 

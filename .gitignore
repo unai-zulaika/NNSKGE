@@ -1,6 +1,8 @@
 ProxGradPytorch/
 proximal_gradient/
 
+test.txt
+
 # nohup
 *.out
 
