@@ -166,9 +166,7 @@ class Experiment:
             opt = torch.optim.Adam(model.parameters(),
                                    lr=self.learning_rate,
                                    weight_decay=0.0)
-            for name, param in model.named_parameters():
-                if param.requires_grad:
-                    print(name, param.data)
+
         elif self.optimizer == 'SGD':
             opt = torch.optim.SGD(model.parameters(),
                                   lr=self.learning_rate,
@@ -182,10 +180,6 @@ class Experiment:
                                 mu=self.mu,
                                 momentum=0.9,
                                 reg='l1')
-
-            for name, param in model.named_parameters():
-                if param.requires_grad:
-                    print(name, param.data)
 
         elif self.optimizer == 'RDA_adam':
             print('Using RDA_Adam!')
