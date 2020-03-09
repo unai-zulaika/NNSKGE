@@ -1,41 +1,36 @@
-Package         Version   
---------------- ----------
-asn1crypto      0.24.0    
-certifi         2019.11.28
-chardet         3.0.4     
-Click           7.0       
-configparser    4.0.2     
-cryptography    2.1.4     
-docker-pycreds  0.4.0     
-gitdb2          2.0.6     
-GitPython       3.0.5     
-gql             0.2.0     
-graphql-core    1.1       
-idna            2.6       
-keyring         10.6.0    
-keyrings.alt    3.0       
-numpy           1.18.1    
-nvidia-ml-py3   7.352.0   
-pathtools       0.1.2     
-pip             20.0.2    
-promise         2.3       
-psutil          5.6.7     
-pycrypto        2.6.1     
-pygobject       3.26.1    
-python-dateutil 2.8.1     
-pyxdg           0.25      
-PyYAML          5.3       
-requests        2.22.0    
-SecretStorage   2.3.1     
-sentry-sdk      0.14.1    
-setuptools      39.0.1    
-shortuuid       0.5.0     
-six             1.11.0    
-smmap2          2.0.5     
-subprocess32    3.5.4     
-torch           1.4.0     
-tqdm            4.43.0    
-urllib3         1.25.8    
-wandb           0.8.22    
-watchdog        0.10.0    
-wheel           0.30.0    
+asn1crypto==0.24.0
+certifi==2019.11.28
+chardet==3.0.4
+Click==7.0
+configparser==4.0.2
+cryptography==2.1.4
+docker-pycreds==0.4.0
+gitdb2==2.0.6
+GitPython==3.0.5
+gql==0.2.0
+graphql-core==1.1
+idna==2.6
+keyring==10.6.0
+keyrings.alt==3.0
+numpy==1.18.1
+nvidia-ml-py3==7.352.0
+pathtools==0.1.2
+promise==2.3
+psutil==5.6.7
+pycrypto==2.6.1
+pygobject==3.26.1
+python-dateutil==2.8.1
+pyxdg==0.25
+PyYAML==5.3
+requests==2.22.0
+SecretStorage==2.3.1
+sentry-sdk==0.14.1
+shortuuid==0.5.0
+six==1.11.0
+smmap2==2.0.5
+subprocess32==3.5.4
+torch==1.4.0
+tqdm==4.43.0
+urllib3==1.25.8
+wandb==0.8.22
+watchdog==0.10.0
