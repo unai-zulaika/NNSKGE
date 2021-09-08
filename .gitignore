@@ -1,5 +1,6 @@
 ProxGradPytorch/
 proximal_gradient/
+runs_interpretable/
 
 *.txt
 

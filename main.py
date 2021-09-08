@@ -1,5 +1,5 @@
 """
-from https://github.com/ibalazevic/TuckER
+Code base corresponds to https://github.com/ibalazevic/TuckER
 """
 import time
 import argparse
@@ -8,13 +8,11 @@ import os
 from collections import defaultdict
 
 from load_data import Data
-from model import TuckER
+from model import TuckER, RESCAL
 from interpretability_evaluation import getDistRatio, pick_top_k
 from gRDA import gRDA_momentum, gRDAAdam
 
-# Init wandb
 import wandb
-
 import numpy as np
 import torch
 import torch.nn.functional as F
@@ -37,7 +35,10 @@ class Experiment:
                  optimizer='RDA',
                  reg=10e-08,
                  mu=0.5,
-                 c=0.0005):
+                 c=0.0005,
+                 model='TuckER',
+                 val_iterations=200,
+                 stats_iterations=200):
         self.learning_rate = learning_rate
         self.ent_vec_dim = ent_vec_dim
         self.rel_vec_dim = rel_vec_dim
@@ -51,6 +52,9 @@ class Experiment:
         self.reg = reg
         self.mu = mu
         self.c = c
+        self.model = model
+        self.val_iterations = val_iterations
+        self.stats_iterations = stats_iterations
         self.kwargs = {
             "input_dropout": input_dropout,
             "hidden_dropout1": hidden_dropout1,
@@ -154,7 +158,12 @@ class Experiment:
         train_data_idxs = self.get_data_idxs(d.train_data)
         print("Number of training data points: %d" % len(train_data_idxs))
 
-        model = TuckER(d, self.ent_vec_dim, self.rel_vec_dim, **self.kwargs)
+        if self.model == 'TuckER':
+            model = TuckER(d, self.ent_vec_dim, self.rel_vec_dim,
+                           **self.kwargs)
+        elif self.model == 'RESCAL':
+            model = RESCAL(d, self.ent_vec_dim, self.rel_vec_dim,
+                           **self.kwargs)
 
         wandb.watch(model, log="all")
 
@@ -238,25 +247,20 @@ class Experiment:
                                                    start_train)))))
             print('Mean loss: {}'.format(np.mean(losses)))
             wandb.log({'loss': np.mean(losses)}, step=it)
-            model.eval()
-            with torch.no_grad():
 
-                print('++' * 20)
-                print("Validation:")
-                self.evaluate(model, d.valid_data, it)
-                if not it % 5:
-                    print('##' * 20)
-                    print("Test:")
-                    start_test = time.time()
-                    self.evaluate(model, d.test_data, it)
-                    print('Test Time (h:m:s): {:2}'.format(
-                        str(
-                            datetime.timedelta(seconds=int(time.time() -
-                                                           start_test)))))
 
-                if not it % 100:
-                    pick_top_k(model.E, d.entity_ids_to_readable,
-                               self.idxs_entity)
+            if not it % self.val_iterations:
+                ### Validation ### 
+                model.eval()
+                with torch.no_grad():
+
+                    print('++' * 20)
+                    print("Validation:")
+                    self.evaluate(model, d.valid_data, it)
+
+            if not it % self.stats_iterations:
+                pick_top_k(model.E, d.entity_ids_to_readable,
+                            self.idxs_entity, wandb.run.id)
 
                 print('Sparsity (entity embeddings): {}'.format(
                     model.count_zero_weights_ent()))
@@ -286,6 +290,15 @@ class Experiment:
                 print('DistRatio (relation embeddings): {}'.format(r_dr))
                 wandb.log({'rel_distratio': r_dr}, step=it)
 
+        print('##' * 20)
+        print("Test:")
+        start_test = time.time()
+        self.evaluate(model, d.test_data, it)
+        print('Test Time (h:m:s): {:2}'.format(
+            str(
+                datetime.timedelta(seconds=int(time.time() -
+                                            start_test)))))
+
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -294,7 +307,7 @@ if __name__ == '__main__':
         type=str,
         default="FB15k-237",
         nargs="?",
-        help="Which dataset to use: FB15k, FB15k-237, WN18 or WN18RR.")
+        help="Which dataset to use: FB15k, FB15k-237, NELL-995, WN18 or WN18RR.")
     parser.add_argument("--loss",
                         type=str,
                         default="BCE",
@@ -375,6 +388,21 @@ if __name__ == '__main__':
                         action='store_true',
                         default=False,
                         help="Log wandb.")
+    parser.add_argument("--model",
+                        type=str,
+                        default="TuckER",
+                        nargs="?",
+                        help="TuckER or RESCAL.")
+    parser.add_argument("--val_iterations",
+                        type=int,
+                        default=200,
+                        nargs="?",
+                        help="Validate after n iterations.")
+    parser.add_argument("--stats_iterations",
+                        type=int,
+                        default=200,
+                        nargs="?",
+                        help="Validate after n iterations.")
 
     args = parser.parse_args()
 
@@ -407,7 +435,10 @@ if __name__ == '__main__':
                             optimizer=args.optimizer,
                             loss=args.loss,
                             mu=args.mu,
-                            c=args.c)
+                            c=args.c,
+                            model=args.model,
+                            val_iterations=args.val_iterations,
+                            stats_iterations=args.stats_iterations)
     experiment.train_and_eval()
     print('#' * 40)
     print("Finished!")

@@ -3,6 +3,9 @@ import io
 import os
 from tqdm import tqdm
 import urllib
+import nltk
+nltk.download('wordnet')
+from nltk.corpus import wordnet
 
 from load_data import Data
 
@@ -33,8 +36,24 @@ def save_ids_to_file(ids_to_ents, filename='labels'):
             f.write('{}\t{}\n'.format(k, human_label))
         f.close()
 
+def wn_get_entities(d, filename='dict_entities_wn'):
+    path = '{}.txt'.format(filename)
 
-data_dir = "data/%s/" % 'FB15k-237'
+    if not os.path.exists(path):
+        f = io.open(path, "w", encoding='utf8')
+
+        for w in d.entities:
+            try: 
+                f.write('{}\t{}\n'.format(int(w), wordnet.synset_from_pos_and_offset('n' , int(w)).lemma_names()))
+            except:
+                f.write('{}\tNone\n'.format(int(w)))
+
+        f.close()
+
+data_dir = "data/%s/" % 'WN18RR'
 d = Data(data_dir=data_dir, reverse=True)
+wn_get_entities(d)
 
-save_ids_to_file(d.relations, filename='dict_relations')
+        
+
+# save_ids_to_file(d.relations, filename='dict_relations')

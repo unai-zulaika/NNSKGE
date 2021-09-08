@@ -16,7 +16,9 @@ class Data:
         self.relations = self.train_relations + [i for i in self.valid_relations \
                 if i not in self.train_relations] + [i for i in self.test_relations \
                 if i not in self.train_relations]
+        self.data_dir = data_dir
         self.entity_ids_to_readable = self.load_entity_ids_to_readable()
+
 
     def load_data(self, data_dir, data_type="train", reverse=False):
         with open("%s%s.txt" % (data_dir, data_type), "r") as f:
@@ -27,7 +29,7 @@ class Data:
         return data
 
     def load_entity_ids_to_readable(self):
-        with open("dict_entities.txt", "r") as f:
+        with open("dict_entities_fbk.txt", "r", encoding='utf-8') if self.data_dir=="data/FB15k-237/" else open("dict_entities_wn.txt", "r", encoding='utf-8') as f:
             data = f.read().strip().split("\n")
 
             ent_dict = {}

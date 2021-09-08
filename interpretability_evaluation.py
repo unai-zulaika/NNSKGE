@@ -1,25 +1,42 @@
 import torch
 
+from datetime import datetime
 
-def pick_top_k(embeddings_indexes, ent_dict, idxs_entity, k=5):
+
+def pick_top_k(embeddings_indexes, ent_dict, idxs_entity, exp_name, k=5):
     embeddings = embeddings_indexes.weight
     _, indexes = torch.sort(embeddings, dim=0, descending=True)
 
     topk_words = [[0 for i in range(k + 1)]
                   for j in range(embeddings.shape[1])]
 
-    # foreach dimension pick the top k embeddings
-    for d in range(embeddings.shape[1]):
-        for i in range(k):
-            topk_words[d][i] = ' '.join(
-                ent_dict[idxs_entity[indexes[i, d].item()]])
-        topk_words[d][-1] = ' '.join(
-            ent_dict[idxs_entity[indexes[-1, d].item()]])
+    try:
+        # foreach dimension pick the top k embeddings
+        for d in range(embeddings.shape[1]):
+            for i in range(k):
+                if idxs_entity[indexes[i, d].item()].isdigit():
+                    e = str(int(idxs_entity[indexes[i, d].item()]))
+                else:
+                    e = idxs_entity[indexes[i, d].item()]
+                topk_words[d][i] = ' '.join(ent_dict[e])
 
-    f = open("test.txt", "w+")
+            if idxs_entity[indexes[i, d].item()].isdigit():
+                e = str(int(idxs_entity[indexes[-1, d].item()]))
+            else:
+                e = idxs_entity[indexes[-1, d].item()]
+            topk_words[d][-1] = ' '.join(ent_dict[e])
+    except Exception:
+        print('A word could not be found.')
+        pass
+
+    # f = open(datetime.now().strftime("%m/%d/%Y, %H:%M:%S"),
+    #          "w+",
+    #          encoding='utf8')
+    f = open('runs_interpretable/' + exp_name, 'w+', encoding='utf8')
+
     for d in range(embeddings.shape[1]):
         for i in range(k + 1):
-            f.write(topk_words[d][i] + ', ')
+            f.write(str(topk_words[d][i]) + ', ')
         f.write("\n")
 
 
@@ -55,7 +72,11 @@ def intradist(topk, embeddings_indexes, indexes, k=5):
                 if i != j])
 
 
-def interdist(topk, intruder, intruder_index, embeddings_indexes, indexes,
+def interdist(topk,
+              intruder,
+              intruder_index,
+              embeddings_indexes,
+              indexes,
               k=5):
 
     return sum([(torch.dist(
